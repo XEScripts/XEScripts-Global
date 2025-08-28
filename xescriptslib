@@ -34,22 +34,22 @@ local function isExploitFileApiAvailable()
     return writefile and readfile and isfile and makefolder
 end
 
--- Neverlose theme colors
+-- Neverlose theme colors (with light background)
 local neverloseTheme = {
-    Background = Color3.fromRGB(15, 15, 20),
-    Window = Color3.fromRGB(22, 22, 28),
-    Panel = Color3.fromRGB(28, 28, 35),
-    Element = Color3.fromRGB(35, 35, 42),
-    ElementHover = Color3.fromRGB(40, 40, 47),
+    Background = Color3.fromRGB(240, 240, 245),
+    Window = Color3.fromRGB(255, 255, 255),
+    Panel = Color3.fromRGB(248, 248, 250),
+    Element = Color3.fromRGB(235, 235, 240),
+    ElementHover = Color3.fromRGB(225, 225, 230),
     Accent = Color3.fromRGB(138, 97, 204),
     AccentDark = Color3.fromRGB(118, 77, 184),
-    Text = Color3.fromRGB(255, 255, 255),
-    TextDim = Color3.fromRGB(180, 180, 180),
-    TextDark = Color3.fromRGB(120, 120, 120),
+    Text = Color3.fromRGB(25, 25, 30),
+    TextDim = Color3.fromRGB(100, 100, 120),
+    TextDark = Color3.fromRGB(140, 140, 160),
     Success = Color3.fromRGB(106, 170, 100),
     Warning = Color3.fromRGB(255, 193, 7),
     Danger = Color3.fromRGB(220, 53, 69),
-    Border = Color3.fromRGB(45, 45, 52),
+    Border = Color3.fromRGB(200, 200, 210),
     Font = Enum.Font.Gotham,
     CornerRadius = 4,
     Shadow = true
@@ -379,46 +379,57 @@ function NeverloseLib:CreateWindow(opts)
     winObj.tabs = {}
     winObj.activeTab = nil
     
-    -- Close functionality (fixed)
+    -- Close functionality (fixed and simplified)
     closeBtn.MouseButton1Click:Connect(function()
-        tween(window, 0.3, {Size = UDim2.new(0, 0, 0, 0), Position = UDim2.new(0.5, 0, 0.5, 0)})
-        spawn(function()
-            wait(0.3)
-            screenGui:Destroy()
-        end)
+        screenGui:Destroy()
     end)
     
     -- Hover effect for close button
     closeBtn.MouseEnter:Connect(function()
-        tween(closeBtn, 0.2, {BackgroundColor3 = Theme.Danger})
+        closeBtn.BackgroundColor3 = Theme.Danger
     end)
     
     closeBtn.MouseLeave:Connect(function()
-        tween(closeBtn, 0.2, {BackgroundColor3 = Theme.Element})
+        closeBtn.BackgroundColor3 = Theme.Element
     end)
     
-    -- Dragging (fixed)
+    -- Dragging system (completely rewritten)
     local dragging = false
-    local dragStart, startPos
+    local lastMousePos = Vector2.new(0, 0)
     
+    local function startDrag(inputPos)
+        dragging = true
+        lastMousePos = inputPos
+    end
+    
+    local function updateDrag(inputPos)
+        if dragging then
+            local delta = inputPos - lastMousePos
+            window.Position = window.Position + UDim2.new(0, delta.X, 0, delta.Y)
+            lastMousePos = inputPos
+        end
+    end
+    
+    local function endDrag()
+        dragging = false
+    end
+    
+    -- Mouse events for dragging
     titleBar.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-            dragStart = input.Position
-            startPos = window.Position
-            
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
-            end)
+            startDrag(Vector2.new(input.Position.X, input.Position.Y))
         end
     end)
     
-    titleBar.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement and dragging then
-            local delta = input.Position - dragStart
-            window.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    game:GetService("UserInputService").InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
+            updateDrag(Vector2.new(input.Position.X, input.Position.Y))
+        end
+    end)
+    
+    game:GetService("UserInputService").InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            endDrag()
         end
     end)
     
@@ -1360,13 +1371,9 @@ function NeverloseLib:CreateWindow(opts)
     end
     
     function winObj:Destroy()
-        tween(window, 0.3, {Size = UDim2.new(0, 0, 0, 0), Position = UDim2.new(0.5, 0, 0.5, 0)})
-        spawn(function()
-            wait(0.3)
-            if screenGui and screenGui.Parent then
-                screenGui:Destroy()
-            end
-        end)
+        if screenGui and screenGui.Parent then
+            screenGui:Destroy()
+        end
     end
     
     -- Intro animation
