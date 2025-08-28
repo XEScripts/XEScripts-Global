@@ -1,26 +1,38 @@
--- GuiLib_NeverLose.lua
--- Полноценная UI-библиотека в стиле NeverLose
+-- GuiLib.lua
 -- Версия: 1.0.0
--- Загрузить: local UI = loadstring(game:HttpGet("RAW_URL"))()
+-- Требует: writefile/readfile/isfile/makefolder (если доступны) для конфигов
+-- Загружать как: local UI = loadstring(game:HttpGet("RAW_URL"))()
 
-local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
 local HttpService = game:GetService("HttpService")
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
 
-local localPlayer = Players.LocalPlayer
-assert(localPlayer, "GuiLib_NeverLose: must be run in a LocalScript")
+local GuiLib = {}
+GuiLib.__index = GuiLib
 
--- ---------- Helpers ----------
-local function safePcall(fn, ...)
-    local ok, res = pcall(fn, ...)
+-- ===== Defaults / Helpers =====
+local function safeCall(f, ...)
+    local ok, res = pcall(f, ...)
     if not ok then
-        warn("[GuiLib_NeverLose] error:", res)
+        warn("[GuiLib] Error:", res)
     end
     return ok, res
 end
 
-local function clamp(v, a, b) return math.max(a, math.min(b, v)) end
+local function isExploitFileApiAvailable()
+    return writefile and readfile and isfile and makefolder
+end
+
+local defaultTheme = {
+    Background = Color3.fromRGB(20,20,20),
+    Window = Color3.fromRGB(28,28,28),
+    Accent = Color3.fromRGB(100,160,255),
+    Element = Color3.fromRGB(45,45,45),
+    Text = Color3.fromRGB(235,235,235),
+    Font = Enum.Font.Gotham,
+    CornerRadius = 8,
+    Shadow = true
+}
 
 local uidCounter = 0
 local function genId(prefix)
@@ -28,86 +40,61 @@ local function genId(prefix)
     return (prefix or "id") .. "_" .. tostring(uidCounter)
 end
 
-local function colorToTable(c) return {c.R, c.G, c.B} end
-local function tableToColor(t) return Color3.new(t[1] or 1, t[2] or 1, t[3] or 1) end
-
-local function isExploitFileApi()
-    return (type(writefile) == "function") and (type(readfile) == "function") and (type(isfile) == "function")
-end
-
-local function safeWriteFile(path, content)
-    if not isExploitFileApi() then return false, "writefile unavailable" end
-    return pcall(function() writefile(path, content) end)
-end
-local function safeReadFile(path)
-    if not isExploitFileApi() then return false, "readfile unavailable" end
-    return pcall(function() return readfile(path) end)
-end
-local function safeIsFile(path)
-    if not isExploitFileApi() then return false end
-    return pcall(function() return isfile(path) end)
-end
-local function safeMakeFolder(path)
-    if type(makefolder) ~= "function" then return false end
-    return pcall(function() makefolder(path) end)
-end
-local function safeListFiles(path)
-    if type(listfiles) ~= "function" then return nil end
-    local ok, res = pcall(function() return listfiles(path) end)
-    if ok then return res end
-    return nil
-end
-
--- ---------- Default Themes ----------
-local THEMES = {
-    Dark = {
-        Name = "Dark",
-        Background = Color3.fromRGB(18,18,18),
-        Window = Color3.fromRGB(28,28,28),
-        Panel = Color3.fromRGB(38,38,38),
-        Element = Color3.fromRGB(52,52,52),
-        Accent = Color3.fromRGB(100,160,255),
-        Text = Color3.fromRGB(235,235,235),
-        MutedText = Color3.fromRGB(180,180,180),
-        Corner = 10,
-        Font = Enum.Font.Gotham
-    },
-    Light = {
-        Name = "Light",
-        Background = Color3.fromRGB(245,245,245),
-        Window = Color3.fromRGB(230,230,230),
-        Panel = Color3.fromRGB(215,215,215),
-        Element = Color3.fromRGB(200,200,200),
-        Accent = Color3.fromRGB(30,120,220),
-        Text = Color3.fromRGB(20,20,20),
-        MutedText = Color3.fromRGB(60,60,60),
-        Corner = 8,
-        Font = Enum.Font.Gotham
-    }
-}
-
--- ---------- Library core ----------
-local GuiLib = {}
-GuiLib.__index = GuiLib
-
+-- ===== Config Manager =====
 GuiLib.ConfigManager = {
-    folder = "NeverLoseUI_Configs",
-    data = {},
-    autosave = true,
-    autosave_interval = 6 -- seconds (optional) -- not auto started, can be implemented by user
+    folder = "GuiLibConfigs",
+    data = {}
 }
 
--- ensure folder if possible
-if isExploitFileApi() and type(makefolder) == "function" then
-    safePcall(function()
-        if not isfolder then return end
-        if not isfolder(GuiLib.ConfigManager.folder) then
+if isExploitFileApiAvailable() then
+    if not isfolder then
+        -- some exploits use different name, but usually isfolder exists; check fallback
+        -- we'll still pcall below
+    end
+    safeCall(function()
+        if (not (isfolder and isfolder(GuiLib.ConfigManager.folder))) and (makefolder) then
             makefolder(GuiLib.ConfigManager.folder)
         end
     end)
 end
 
--- registries for restoring state
+function GuiLib.ConfigManager:Save(name)
+    if not name then return false, "No name" end
+    local path = self.folder .. "/" .. name
+    local encoded = HttpService:JSONEncode(self.data)
+    if writefile then
+        return pcall(function() writefile(path, encoded) end)
+    else
+        return false, "writefile not available"
+    end
+end
+
+function GuiLib.ConfigManager:Load(name)
+    if not name then return false, "No name" end
+    local path = self.folder .. "/" .. name
+    if isfile and isfile(path) then
+        local content = readfile(path)
+        local ok, parsed = pcall(function() return HttpService:JSONDecode(content) end)
+        if ok and type(parsed) == "table" then
+            self.data = parsed
+            return true
+        else
+            return false, "parse error"
+        end
+    else
+        return false, "file not found"
+    end
+end
+
+function GuiLib.ConfigManager:List()
+    if isfolder and isfolder(self.folder) and listfiles then
+        local ok, res = pcall(function() return listfiles(self.folder) end)
+        if ok then return res end
+    end
+    return {}
+end
+
+-- ===== Internal registries for elements (for restoring values) =====
 GuiLib._registry = {
     toggles = {},
     sliders = {},
@@ -117,102 +104,62 @@ GuiLib._registry = {
     textboxes = {}
 }
 
--- Save/load helpers
-function GuiLib.ConfigManager:Save(name)
-    if not name or name == "" then return false, "no name" end
-    local path = self.folder .. "/" .. name
-    local ok, encoded = pcall(function() return HttpService:JSONEncode(self.data) end)
-    if not ok then return false, "encoding error" end
-    return safeWriteFile(path, encoded)
-end
-
-function GuiLib.ConfigManager:Load(name)
-    if not name or name == "" then return false, "no name" end
-    local path = self.folder .. "/" .. name
-    local ok_exists = safeIsFile(path)
-    if not ok_exists then return false, "file api not available" end
-    if not (ok_exists == true) then return false, "file not found" end
-    local ok, content = safeReadFile(path)
-    if not ok then return false, "read failed" end
-    local ok2, parsed = pcall(function() return HttpService:JSONDecode(content) end)
-    if not ok2 then return false, "json parse failed" end
-    self.data = parsed or {}
-    return true
-end
-
-function GuiLib.ConfigManager:List()
-    if type(listfiles) == "function" then
-        local ok, files = pcall(function() return listfiles(self.folder) end)
-        if ok and type(files) == "table" then
-            return files
-        end
-    end
-    return {}
-end
-
--- internal: apply config to registered elements
-function GuiLib:_applyConfigMap()
+-- Restore helper (applies loaded config to registered elements)
+function GuiLib:_applyConfig()
     local data = GuiLib.ConfigManager.data or {}
     for id, val in pairs(data) do
+        -- toggles
         if GuiLib._registry.toggles[id] then
             GuiLib._registry.toggles[id].Set(val)
-        elseif GuiLib._registry.sliders[id] then
+        end
+        if GuiLib._registry.sliders[id] then
             GuiLib._registry.sliders[id].Set(val)
-        elseif GuiLib._registry.dropdowns[id] then
+        end
+        if GuiLib._registry.dropdowns[id] then
             GuiLib._registry.dropdowns[id].Set(val)
-        elseif GuiLib._registry.colorpickers[id] then
-            if type(val) == "table" then
-                GuiLib._registry.colorpickers[id].Set(tableToColor(val))
+        end
+        if GuiLib._registry.colorpickers[id] then
+            -- Color3 serialized as table {r,g,b}
+            local v = val
+            if type(v) == "table" then
+                GuiLib._registry.colorpickers[id].Set(Color3.new(v[1],v[2],v[3]))
             end
-        elseif GuiLib._registry.keybinds[id] then
+        end
+        if GuiLib._registry.keybinds[id] then
             GuiLib._registry.keybinds[id].Set(val)
-        elseif GuiLib._registry.textboxes[id] then
+        end
+        if GuiLib._registry.textboxes[id] then
             GuiLib._registry.textboxes[id].Set(val)
         end
     end
 end
 
+-- Save single key
 function GuiLib:_saveKey(id, v)
     GuiLib.ConfigManager.data[id] = v
 end
 
--- ---------- Global Keybind handler (efficient) ----------
-local _globalKeybinds = {} -- {KeyCodeName = {fn1, fn2, ...}}
-
-UserInputService.InputBegan:Connect(function(input, processed)
-    if processed then return end
-    if input.UserInputType == Enum.UserInputType.Keyboard then
-        local name = tostring(input.KeyCode.Name)
-        local handlers = _globalKeybinds[name]
-        if handlers then
-            for _,fn in ipairs(handlers) do
-                safePcall(fn)
-            end
-        end
-    end
-end)
-
--- ---------- Window creation ----------
+-- ===== Core: CreateWindow =====
 function GuiLib:CreateWindow(opts)
     opts = opts or {}
-    local Title = opts.Title or "NeverLose UI"
-    local Size = opts.Size or UDim2.new(0, 640, 0, 380)
-    local Position = opts.Position or UDim2.new(0.5, -320, 0.5, -190)
-    local ThemeName = (opts.ThemeName and (opts.ThemeName == "Light" and "Light" or "Dark")) or "Dark"
-    local Theme = opts.Theme or THEMES[ThemeName] or THEMES.Dark
+    local player = Players.LocalPlayer
+    assert(player, "LocalPlayer required (run from LocalScript)")
+
+    local Title = opts.Title or "GuiLib Window"
+    local Size = opts.Size or UDim2.new(0, 600, 0, 360)
+    local Position = opts.Position or UDim2.new(0.5, -300, 0.5, -180)
+    local Theme = opts.Theme or {}
+    for k,v in pairs(defaultTheme) do
+        if Theme[k] == nil then Theme[k] = v end
+    end
+
+    -- ScreenGui
     local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = genId("NeverLoseScreen")
+    screenGui.Name = genId("GuiLibScreen")
     screenGui.ResetOnSpawn = false
-    screenGui.Parent = localPlayer:WaitForChild("PlayerGui")
+    screenGui.Parent = player:WaitForChild("PlayerGui")
 
-    -- background (optional dim)
-    local bg = Instance.new("Frame")
-    bg.BackgroundColor3 = Theme.Background
-    bg.Size = UDim2.new(1,0,1,0)
-    bg.BorderSizePixel = 0
-    bg.Parent = screenGui
-
-    -- main window
+    -- Main window
     local window = Instance.new("Frame")
     window.Size = Size
     window.Position = Position
@@ -222,84 +169,55 @@ function GuiLib:CreateWindow(opts)
     window.Parent = screenGui
 
     local windowCorner = Instance.new("UICorner")
-    windowCorner.CornerRadius = UDim.new(0, Theme.Corner)
+    windowCorner.CornerRadius = UDim.new(0, Theme.CornerRadius)
     windowCorner.Parent = window
 
-    -- title bar
-    local titleBar = Instance.new("Frame")
-    titleBar.Size = UDim2.new(1,0,0,40)
-    titleBar.BackgroundColor3 = Theme.Panel
-    titleBar.BorderSizePixel = 0
-    titleBar.Parent = window
-    local tCorner = Instance.new("UICorner") tCorner.CornerRadius = UDim.new(0, Theme.Corner) tCorner.Parent = titleBar
+    -- Title bar
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1,0,0,36)
+    title.BackgroundColor3 = Theme.Background
+    title.BorderSizePixel = 0
+    title.Text = Title
+    title.TextColor3 = Theme.Text
+    title.Font = Theme.Font
+    title.TextSize = 18
+    title.Parent = window
 
-    local titleLabel = Instance.new("TextLabel")
-    titleLabel.Size = UDim2.new(0.8, -10, 1, 0)
-    titleLabel.Position = UDim2.new(0,12,0,0)
-    titleLabel.BackgroundTransparency = 1
-    titleLabel.Text = Title
-    titleLabel.TextColor3 = Theme.Text
-    titleLabel.Font = Theme.Font
-    titleLabel.TextSize = 18
-    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    titleLabel.Parent = titleBar
+    local titleCorner = Instance.new("UICorner")
+    titleCorner.CornerRadius = UDim.new(0, Theme.CornerRadius)
+    titleCorner.Parent = title
 
-    -- right controls (close/theme switch)
-    local closeBtn = Instance.new("TextButton")
-    closeBtn.Size = UDim2.new(0,36,0,36)
-    closeBtn.Position = UDim2.new(1, -44, 0, 2)
-    closeBtn.BackgroundColor3 = Theme.Element
-    closeBtn.BorderSizePixel = 0
-    closeBtn.Text = "X"
-    closeBtn.Font = Theme.Font
-    closeBtn.TextSize = 16
-    closeBtn.TextColor3 = Theme.Text
-    closeBtn.Parent = titleBar
-    local cbCorner = Instance.new("UICorner") cbCorner.CornerRadius = UDim.new(0,6) cbCorner.Parent = closeBtn
+    -- Tabs holder
+    local tabHolder = Instance.new("Frame")
+    tabHolder.Size = UDim2.new(1,0,0,34)
+    tabHolder.Position = UDim2.new(0,0,0,36)
+    tabHolder.BackgroundTransparency = 1
+    tabHolder.Parent = window
 
-    local themeBtn = Instance.new("TextButton")
-    themeBtn.Size = UDim2.new(0,36,0,36)
-    themeBtn.Position = UDim2.new(1, -88, 0, 2)
-    themeBtn.BackgroundColor3 = Theme.Element
-    themeBtn.BorderSizePixel = 0
-    themeBtn.Text = Theme.Name == "Dark" and "☾" or "☼"
-    themeBtn.Font = Theme.Font
-    themeBtn.TextSize = 16
-    themeBtn.TextColor3 = Theme.Text
-    themeBtn.Parent = titleBar
-    local tbCorner = Instance.new("UICorner") tbCorner.CornerRadius = UDim.new(0,6) tbCorner.Parent = themeBtn
+    local tabLayout = Instance.new("UIListLayout")
+    tabLayout.FillDirection = Enum.FillDirection.Horizontal
+    tabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+    tabLayout.Padding = UDim.new(0,6)
+    tabLayout.Parent = tabHolder
 
-    -- tabs holder
-    local tabsHolder = Instance.new("Frame")
-    tabsHolder.Size = UDim2.new(1, -12, 0, 36)
-    tabsHolder.Position = UDim2.new(0,6,0,44)
-    tabsHolder.BackgroundTransparency = 1
-    tabsHolder.Parent = window
-
-    local tabsLayout = Instance.new("UIListLayout")
-    tabsLayout.FillDirection = Enum.FillDirection.Horizontal
-    tabsLayout.Padding = UDim.new(0,8)
-    tabsLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-    tabsLayout.Parent = tabsHolder
-
-    -- content holder
+    -- Content holder
     local contentHolder = Instance.new("Frame")
-    contentHolder.Size = UDim2.new(1, -12, 1, -98)
-    contentHolder.Position = UDim2.new(0,6,0,84)
+    contentHolder.Size = UDim2.new(1, -10, 1, -90)
+    contentHolder.Position = UDim2.new(0,5,0,78)
     contentHolder.BackgroundTransparency = 1
     contentHolder.Parent = window
 
-    -- window object to return
+    -- Internal window object
     local winObj = {}
     winObj.screenGui = screenGui
     winObj.window = window
     winObj.theme = Theme
     winObj.tabs = {}
 
-    -- draggable window
+    -- Draggable window (by title)
     do
         local dragging, dragInput, dragStart, startPos
-        titleBar.InputBegan:Connect(function(input)
+        title.InputBegan:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1 then
                 dragging = true
                 dragStart = input.Position
@@ -311,77 +229,34 @@ function GuiLib:CreateWindow(opts)
                 end)
             end
         end)
-        titleBar.InputChanged:Connect(function(input)
+        title.InputChanged:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseMovement then
                 dragInput = input
             end
         end)
         UserInputService.InputChanged:Connect(function(input)
-            if dragging and input == dragInput then
+            if input == dragInput and dragging then
                 local delta = input.Position - dragStart
                 window.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
             end
         end)
     end
 
-    -- close action
-    closeBtn.MouseButton1Click:Connect(function()
-        safePcall(function() screenGui:Destroy() end)
-    end)
-
-    -- theme toggle
-    themeBtn.MouseButton1Click:Connect(function()
-        if winObj.theme.Name == "Dark" then
-            winObj.theme = THEMES.Light
-        else
-            winObj.theme = THEMES.Dark
-        end
-        -- apply theme immediately (simple repaint)
-        local T = winObj.theme
-        titleBar.BackgroundColor3 = T.Panel
-        titleLabel.TextColor3 = T.Text
-        closeBtn.BackgroundColor3 = T.Element
-        closeBtn.TextColor3 = T.Text
-        themeBtn.BackgroundColor3 = T.Element
-        themeBtn.TextColor3 = T.Text
-        window.BackgroundColor3 = T.Window
-        bg.BackgroundColor3 = T.Background
-        -- update existing elements colors (best-effort)
-        for _,tab in ipairs(winObj.tabs) do
-            -- tab button
-            if tab._button and tab._button.Parent then
-                tab._button.BackgroundColor3 = T.Element
-                tab._button.TextColor3 = T.Text
-            end
-            -- update tab elements
-            for _,el in ipairs(tab._elements) do
-                if el:IsA("TextButton") or el:IsA("TextLabel") or el:IsA("TextBox") or el:IsA("Frame") then
-                    if el.Name == "NL_Element" then
-                        el.BackgroundColor3 = T.Element
-                    else
-                        -- best-effort: set text colors
-                        if el:IsA("TextLabel") or el:IsA("TextButton") or el:IsA("TextBox") then
-                            el.TextColor3 = T.Text
-                        end
-                    end
-                end
-            end
-        end
-        themeBtn.Text = winObj.theme.Name == "Dark" and "☾" or "☼"
-    end)
-
-    -- AddTab method
+    -- Tab adding
     function winObj:AddTab(name)
         local tabBtn = Instance.new("TextButton")
-        tabBtn.Size = UDim2.new(0, 120, 1, 0)
+        tabBtn.Size = UDim2.new(0, 100, 1, 0)
         tabBtn.BackgroundColor3 = Theme.Element
         tabBtn.BorderSizePixel = 0
         tabBtn.Text = name
         tabBtn.TextColor3 = Theme.Text
         tabBtn.Font = Theme.Font
         tabBtn.TextSize = 14
-        tabBtn.Parent = tabsHolder
-        local btnCorner = Instance.new("UICorner") btnCorner.CornerRadius = UDim.new(0, Theme.Corner) btnCorner.Parent = tabBtn
+        tabBtn.Parent = tabHolder
+
+        local tabCorner = Instance.new("UICorner")
+        tabCorner.CornerRadius = UDim.new(0, Theme.CornerRadius/1.25)
+        tabCorner.Parent = tabBtn
 
         local tabFrame = Instance.new("ScrollingFrame")
         tabFrame.Size = UDim2.new(1,0,1,0)
@@ -391,45 +266,45 @@ function GuiLib:CreateWindow(opts)
         tabFrame.Visible = false
         tabFrame.Parent = contentHolder
 
-        local listLayout = Instance.new("UIListLayout")
-        listLayout.Padding = UDim.new(0,8)
-        listLayout.Parent = tabFrame
+        local layout = Instance.new("UIListLayout")
+        layout.Padding = UDim.new(0,8)
+        layout.Parent = tabFrame
+
         local padding = Instance.new("UIPadding")
-        padding.PaddingTop = UDim.new(0,8)
-        padding.PaddingLeft = UDim.new(0,8)
+        padding.PaddingTop = UDim.new(0,6)
+        padding.PaddingLeft = UDim.new(0,6)
+        padding.PaddingRight = UDim.new(0,6)
         padding.Parent = tabFrame
 
         local tabObj = {}
         tabObj.name = name
-        tabObj._button = tabBtn
         tabObj.frame = tabFrame
         tabObj._elements = {}
 
+        -- Utility to update canvas
         local function updateCanvas()
-            local total = 0
+            local csize = 0
             for _,child in ipairs(tabFrame:GetChildren()) do
-                if child:IsA("GuiObject") and (child ~= listLayout and child ~= padding) then
-                    total = total + child.AbsoluteSize.Y + 8
+                if child:IsA("GuiObject") and child ~= layout and child ~= padding then
+                    csize = csize + child.AbsoluteSize.Y + 8
                 end
             end
-            tabFrame.CanvasSize = UDim2.new(0,0,0, math.max(0, total))
+            tabFrame.CanvasSize = UDim2.new(0,0,0, math.max(0, csize))
         end
 
-        local function newHolder(h)
-            h = h or 36
+        -- Common element factory helpers
+        local function newElementHolder(height)
             local holder = Instance.new("Frame")
-            holder.Name = "NL_Element"
-            holder.Size = UDim2.new(1, -12, 0, h)
+            holder.Size = UDim2.new(1,0,0,height or 36)
             holder.BackgroundTransparency = 1
             holder.Parent = tabFrame
             holder:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateCanvas)
-            table.insert(tabObj._elements, holder)
             return holder
         end
 
-        -- AddButton
+        -- Button
         function tabObj:AddButton(text, callback)
-            local holder = newHolder(36)
+            local holder = newElementHolder(36)
             local btn = Instance.new("TextButton")
             btn.Size = UDim2.new(1,0,1,0)
             btn.Position = UDim2.new(0,0,0,0)
@@ -440,21 +315,29 @@ function GuiLib:CreateWindow(opts)
             btn.Font = Theme.Font
             btn.TextSize = 14
             btn.Parent = holder
-            local corner = Instance.new("UICorner") corner.CornerRadius = UDim.new(0, Theme.Corner/1.5) corner.Parent = btn
-            btn.MouseButton1Click:Connect(function() safePcall(callback) end)
+
+            local corner = Instance.new("UICorner")
+            corner.CornerRadius = UDim.new(0, Theme.CornerRadius/1.5)
+            corner.Parent = btn
+
+            btn.MouseButton1Click:Connect(function()
+                safeCall(callback)
+            end)
+
+            table.insert(tabObj._elements, btn)
             updateCanvas()
             return btn
         end
 
-        -- AddToggle
+        -- Toggle
         function tabObj:AddToggle(text, default, callback)
-            default = (default == true)
             local id = genId("toggle")
-            local state = default
+            local state = default and true or false
 
-            local holder = newHolder(36)
+            local holder = newElementHolder(36)
             local btn = Instance.new("TextButton")
             btn.Size = UDim2.new(1,0,1,0)
+            btn.Position = UDim2.new(0,0,0,0)
             btn.BackgroundColor3 = Theme.Element
             btn.BorderSizePixel = 0
             btn.Text = text .. " : " .. (state and "ON" or "OFF")
@@ -462,10 +345,13 @@ function GuiLib:CreateWindow(opts)
             btn.Font = Theme.Font
             btn.TextSize = 14
             btn.Parent = holder
-            local corner = Instance.new("UICorner") corner.CornerRadius = UDim.new(0, Theme.Corner/1.5) corner.Parent = btn
+
+            local corner = Instance.new("UICorner")
+            corner.CornerRadius = UDim.new(0, Theme.CornerRadius/1.5)
+            corner.Parent = btn
 
             local function Set(v)
-                state = (v == true)
+                state = v and true or false
                 btn.Text = text .. " : " .. (state and "ON" or "OFF")
             end
 
@@ -473,12 +359,14 @@ function GuiLib:CreateWindow(opts)
                 state = not state
                 Set(state)
                 GuiLib:_saveKey(id, state)
-                if callback then safePcall(callback, state) end
+                if callback then safeCall(callback, state) end
             end)
 
+            -- register
             GuiLib._registry.toggles[id] = { Set = Set }
             GuiLib:_saveKey(id, state)
 
+            table.insert(tabObj._elements, btn)
             updateCanvas()
             return {
                 Set = Set,
@@ -487,59 +375,66 @@ function GuiLib:CreateWindow(opts)
             }
         end
 
-        -- AddSlider
+        -- Slider
         function tabObj:AddSlider(text, min, max, default, callback)
+            local id = genId("slider")
             min = tonumber(min) or 0
             max = tonumber(max) or 100
             default = tonumber(default) or min
-            default = clamp(default, min, max)
-            local id = genId("slider")
-            local value = default
+            local val = math.clamp(default, min, max)
 
-            local holder = newHolder(52)
+            local holder = newElementHolder(48)
             local label = Instance.new("TextLabel")
             label.Size = UDim2.new(1,0,0,18)
+            label.Position = UDim2.new(0,0,0,0)
             label.BackgroundTransparency = 1
-            label.Text = text .. " : " .. tostring(value)
+            label.Text = text .. " : " .. tostring(val)
             label.TextColor3 = Theme.Text
             label.Font = Theme.Font
             label.TextSize = 14
             label.TextXAlignment = Enum.TextXAlignment.Left
             label.Parent = holder
 
-            local bar = Instance.new("Frame")
-            bar.Size = UDim2.new(1, -12, 0, 14)
-            bar.Position = UDim2.new(0,6,0,30)
-            bar.BackgroundColor3 = Theme.Panel
-            bar.BorderSizePixel = 0
-            bar.Parent = holder
-            local barCorner = Instance.new("UICorner") barCorner.CornerRadius = UDim.new(0, Theme.Corner/2) barCorner.Parent = bar
+            local slider = Instance.new("Frame")
+            slider.Size = UDim2.new(1,-12,0,14)
+            slider.Position = UDim2.new(0,6,0,26)
+            slider.BackgroundColor3 = Theme.Element
+            slider.BorderSizePixel = 0
+            slider.Parent = holder
 
             local fill = Instance.new("Frame")
-            local ratio = (value - min) / math.max(1, (max - min))
+            local ratio = (val - min) / math.max(1, (max - min))
             fill.Size = UDim2.new(ratio, 0, 1, 0)
             fill.BackgroundColor3 = Theme.Accent
             fill.BorderSizePixel = 0
-            fill.Parent = bar
-            local fillCorner = Instance.new("UICorner") fillCorner.CornerRadius = UDim.new(0, Theme.Corner/2) fillCorner.Parent = fill
+            fill.Parent = slider
+
+            local corner = Instance.new("UICorner")
+            corner.CornerRadius = UDim.new(0, Theme.CornerRadius/2)
+            corner.Parent = slider
+            local corner2 = Instance.new("UICorner")
+            corner2.CornerRadius = UDim.new(0, Theme.CornerRadius/2)
+            corner2.Parent = fill
 
             local dragging = false
             local function setFromX(x)
-                local rel = clamp((x - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
-                value = math.floor(min + (max - min) * rel)
+                local absPos = slider.AbsolutePosition.X
+                local absSize = slider.AbsoluteSize.X
+                local rel = math.clamp((x - absPos) / absSize, 0, 1)
+                val = math.floor(min + (max - min) * rel)
                 fill.Size = UDim2.new(rel, 0, 1, 0)
-                label.Text = text .. " : " .. tostring(value)
-                GuiLib:_saveKey(id, value)
-                if callback then safePcall(callback, value) end
+                label.Text = text .. " : " .. tostring(val)
+                GuiLib:_saveKey(id, val)
+                if callback then safeCall(callback, val) end
             end
 
-            bar.InputBegan:Connect(function(input)
+            slider.InputBegan:Connect(function(input)
                 if input.UserInputType == Enum.UserInputType.MouseButton1 then
                     dragging = true
                     setFromX(input.Position.X)
                 end
             end)
-            bar.InputEnded:Connect(function(input)
+            slider.InputEnded:Connect(function(input)
                 if input.UserInputType == Enum.UserInputType.MouseButton1 then
                     dragging = false
                 end
@@ -551,32 +446,34 @@ function GuiLib:CreateWindow(opts)
             end)
 
             local function Set(v)
-                value = clamp(math.floor(v), min, max)
-                local rel = (value - min) / math.max(1, (max - min))
+                val = math.clamp(math.floor(v), min, max)
+                local rel = (val - min) / math.max(1, (max - min))
                 fill.Size = UDim2.new(rel, 0, 1, 0)
-                label.Text = text .. " : " .. tostring(value)
+                label.Text = text .. " : " .. tostring(val)
             end
 
             GuiLib._registry.sliders[id] = { Set = Set }
-            GuiLib:_saveKey(id, value)
+            GuiLib:_saveKey(id, val)
 
+            table.insert(tabObj._elements, holder)
             updateCanvas()
+
             return {
                 Set = Set,
-                Get = function() return value end,
+                Get = function() return val end,
                 Id = id
             }
         end
 
-        -- AddDropdown
+        -- Dropdown
         function tabObj:AddDropdown(text, options, defaultIndex, callback)
-            options = options or {}
-            defaultIndex = clamp(tonumber(defaultIndex) or 1, 1, math.max(1, #options))
             local id = genId("dropdown")
-            local idx = defaultIndex
+            options = options or {}
+            local idx = defaultIndex or 1
+            idx = math.clamp(idx,1,#options)
             local selected = options[idx]
 
-            local holder = newHolder(36)
+            local holder = newElementHolder(36)
             local btn = Instance.new("TextButton")
             btn.Size = UDim2.new(1,0,1,0)
             btn.BackgroundColor3 = Theme.Element
@@ -586,18 +483,28 @@ function GuiLib:CreateWindow(opts)
             btn.Font = Theme.Font
             btn.TextSize = 14
             btn.Parent = holder
-            local corner = Instance.new("UICorner") corner.CornerRadius = UDim.new(0, Theme.Corner/1.5) corner.Parent = btn
+
+            local corner = Instance.new("UICorner")
+            corner.CornerRadius = UDim.new(0, Theme.CornerRadius/1.5)
+            corner.Parent = btn
 
             local menu = Instance.new("Frame")
-            menu.Size = UDim2.new(0, 200, 0, math.min(#options, 6) * 28 + 6)
-            menu.Position = UDim2.new(0, 0, 0, 36)
-            menu.BackgroundColor3 = Theme.Panel
+            menu.Size = UDim2.new(0,160,0, (math.min(#options,6) * 28) + 6)
+            menu.Position = UDim2.new(0,0,0,36)
+            menu.BackgroundColor3 = Theme.Element
+            menu.BorderSizePixel = 0
             menu.Visible = false
             menu.Parent = holder
-            local mCorner = Instance.new("UICorner") mCorner.CornerRadius = UDim.new(0, Theme.Corner/2) mCorner.Parent = menu
 
-            local function rebuild()
-                for _,c in ipairs(menu:GetChildren()) do if c:IsA("TextButton") then c:Destroy() end end
+            local menuCorner = Instance.new("UICorner")
+            menuCorner.CornerRadius = UDim.new(0, Theme.CornerRadius/2)
+            menuCorner.Parent = menu
+
+            local menuLayout = Instance.new("UIListLayout")
+            menuLayout.Padding = UDim.new(0,4)
+            menuLayout.Parent = menu
+
+            local function rebuildMenu()
                 for i,v in ipairs(options) do
                     local it = Instance.new("TextButton")
                     it.Size = UDim2.new(1, -8, 0, 24)
@@ -609,24 +516,26 @@ function GuiLib:CreateWindow(opts)
                     it.TextSize = 14
                     it.Parent = menu
                     it.MouseButton1Click:Connect(function()
-                        idx = i
                         selected = v
+                        idx = i
                         btn.Text = text .. " : " .. tostring(selected)
                         menu.Visible = false
                         GuiLib:_saveKey(id, idx)
-                        if callback then safePcall(callback, idx, selected) end
+                        if callback then safeCall(callback, idx, selected) end
                     end)
                 end
             end
 
             btn.MouseButton1Click:Connect(function()
                 menu:ClearAllChildren()
-                rebuild()
+                menuLayout.Parent = menu
+                menuCorner.Parent = menu
+                rebuildMenu()
                 menu.Visible = not menu.Visible
             end)
 
             local function Set(i)
-                i = clamp(tonumber(i) or 1, 1, #options)
+                i = math.clamp(tonumber(i) or 1, 1, #options)
                 idx = i
                 selected = options[idx]
                 btn.Text = text .. " : " .. tostring(selected)
@@ -635,6 +544,7 @@ function GuiLib:CreateWindow(opts)
             GuiLib._registry.dropdowns[id] = { Set = Set }
             GuiLib:_saveKey(id, idx)
 
+            table.insert(tabObj._elements, holder)
             updateCanvas()
             return {
                 Set = Set,
@@ -643,13 +553,12 @@ function GuiLib:CreateWindow(opts)
             }
         end
 
-        -- AddColorPicker (RGB bars)
+        -- ColorPicker (simple)
         function tabObj:AddColorPicker(text, defaultColor, callback)
-            defaultColor = defaultColor or Color3.fromRGB(255,255,255)
             local id = genId("color")
-            local color = defaultColor
+            local color = defaultColor or Color3.fromRGB(255,255,255)
 
-            local holder = newHolder(36)
+            local holder = newElementHolder(36)
             local btn = Instance.new("TextButton")
             btn.Size = UDim2.new(1,0,1,0)
             btn.BackgroundColor3 = Theme.Element
@@ -659,108 +568,156 @@ function GuiLib:CreateWindow(opts)
             btn.Font = Theme.Font
             btn.TextSize = 14
             btn.Parent = holder
-            local corner = Instance.new("UICorner") corner.CornerRadius = UDim.new(0, Theme.Corner/1.5) corner.Parent = btn
 
-            local preview = Instance.new("Frame")
-            preview.Size = UDim2.new(0,28,0,28)
-            preview.Position = UDim2.new(1, -36, 0, 4)
-            preview.BackgroundColor3 = color
-            preview.Parent = holder
-            local pCorner = Instance.new("UICorner") pCorner.CornerRadius = UDim.new(0,6) pCorner.Parent = preview
+            local colorPreview = Instance.new("Frame")
+            colorPreview.Size = UDim2.new(0,28,0,28)
+            colorPreview.Position = UDim2.new(1, -34, 0, 4)
+            colorPreview.BackgroundColor3 = color
+            colorPreview.BorderSizePixel = 0
+            colorPreview.Parent = holder
+
+            local previewCorner = Instance.new("UICorner")
+            previewCorner.CornerRadius = UDim.new(0, 6)
+            previewCorner.Parent = colorPreview
 
             local picker = nil
             local function openPicker()
-                if picker and picker.Parent then picker:Destroy() picker = nil return end
-                picker = Instance.new("Frame")
-                picker.Size = UDim2.new(0,240,0,140)
-                picker.Position = UDim2.new(0,6,0,40)
-                picker.BackgroundColor3 = Theme.Panel
-                picker.Parent = holder
-                local pc = Instance.new("UICorner") pc.CornerRadius = UDim.new(0,8) pc.Parent = picker
-
-                -- create 3 bars: R G B
-                local function createBar(y, labelText, initVal, colorBar)
-                    local lbl = Instance.new("TextLabel")
-                    lbl.Size = UDim2.new(1,-12,0,18)
-                    lbl.Position = UDim2.new(0,6,0,y)
-                    lbl.BackgroundTransparency = 1
-                    lbl.Text = labelText .. " : " .. tostring(math.floor(initVal*255))
-                    lbl.TextXAlignment = Enum.TextXAlignment.Left
-                    lbl.Font = Theme.Font
-                    lbl.TextSize = 14
-                    lbl.TextColor3 = Theme.Text
-                    lbl.Parent = picker
-
-                    local bar = Instance.new("Frame")
-                    bar.Size = UDim2.new(1,-20,0,14)
-                    bar.Position = UDim2.new(0,10,0,y + 22)
-                    bar.BackgroundColor3 = Theme.Background
-                    bar.Parent = picker
-                    local barCorner = Instance.new("UICorner") barCorner.CornerRadius = UDim.new(0,6) barCorner.Parent = bar
-
-                    local fill = Instance.new("Frame")
-                    fill.Size = UDim2.new(initVal, 0, 1, 0)
-                    fill.BackgroundColor3 = colorBar
-                    fill.Parent = bar
-                    local fillCorner = Instance.new("UICorner") fillCorner.CornerRadius = UDim.new(0,6) fillCorner.Parent = fill
-
-                    return lbl, bar, fill
+                if picker and picker.Parent then
+                    picker:Destroy()
+                    picker = nil
+                    return
                 end
+                picker = Instance.new("Frame")
+                picker.Size = UDim2.new(0,220,0,140)
+                picker.Position = UDim2.new(0, 10, 0, 40)
+                picker.BackgroundColor3 = Theme.Element
+                picker.BorderSizePixel = 0
+                picker.Parent = holder
 
-                local rL, rBar, rFill = createBar(6, "R", color.R, Color3.fromRGB(255,0,0))
-                local gL, gBar, gFill = createBar(44, "G", color.G, Color3.fromRGB(0,255,0))
-                local bL, bBar, bFill = createBar(82, "B", color.B, Color3.fromRGB(0,0,255))
+                local corner = Instance.new("UICorner")
+                corner.CornerRadius = UDim.new(0,6)
+                corner.Parent = picker
+
+                -- hue bar + sv square simplified: we'll use built-in RGB sliders
+                local rS = Instance.new("TextLabel")
+                rS.Size = UDim2.new(1,-12,0,22)
+                rS.Position = UDim2.new(0,6,0,6)
+                rS.Text = "R : " .. tostring(math.floor(color.R * 255))
+                rS.TextColor3 = Theme.Text
+                rS.BackgroundTransparency = 1
+                rS.Font = Theme.Font
+                rS.TextXAlignment = Enum.TextXAlignment.Left
+                rS.Parent = picker
+
+                local rBar = Instance.new("Frame")
+                rBar.Size = UDim2.new(1,-20,0,14)
+                rBar.Position = UDim2.new(0,10,0,28)
+                rBar.BackgroundColor3 = Theme.Background
+                rBar.Parent = picker
+                local rFill = Instance.new("Frame")
+                rFill.Size = UDim2.new(color.R, 0, 1, 0)
+                rFill.BackgroundColor3 = Color3.fromRGB(255,0,0)
+                rFill.Parent = rBar
+
+                local gS = Instance.new("TextLabel")
+                gS.Size = UDim2.new(1,-12,0,22)
+                gS.Position = UDim2.new(0,6,0,48)
+                gS.Text = "G : " .. tostring(math.floor(color.G * 255))
+                gS.TextColor3 = Theme.Text
+                gS.BackgroundTransparency = 1
+                gS.Font = Theme.Font
+                gS.TextXAlignment = Enum.TextXAlignment.Left
+                gS.Parent = picker
+
+                local gBar = Instance.new("Frame")
+                gBar.Size = UDim2.new(1,-20,0,14)
+                gBar.Position = UDim2.new(0,10,0,70)
+                gBar.BackgroundColor3 = Theme.Background
+                gBar.Parent = picker
+                local gFill = Instance.new("Frame")
+                gFill.Size = UDim2.new(color.G, 0, 1, 0)
+                gFill.BackgroundColor3 = Color3.fromRGB(0,255,0)
+                gFill.Parent = gBar
+
+                local bS = Instance.new("TextLabel")
+                bS.Size = UDim2.new(1,-12,0,22)
+                bS.Position = UDim2.new(0,6,0,90)
+                bS.Text = "B : " .. tostring(math.floor(color.B * 255))
+                bS.TextColor3 = Theme.Text
+                bS.BackgroundTransparency = 1
+                bS.Font = Theme.Font
+                bS.TextXAlignment = Enum.TextXAlignment.Left
+                bS.Parent = picker
+
+                local bBar = Instance.new("Frame")
+                bBar.Size = UDim2.new(1,-20,0,14)
+                bBar.Position = UDim2.new(0,10,0,112)
+                bBar.BackgroundColor3 = Theme.Background
+                bBar.Parent = picker
+                local bFill = Instance.new("Frame")
+                bFill.Size = UDim2.new(color.B, 0, 1, 0)
+                bFill.BackgroundColor3 = Color3.fromRGB(0,0,255)
+                bFill.Parent = bBar
 
                 local draggingR, draggingG, draggingB = false, false, false
-                local function applyColor()
-                    color = Color3.new(rFill.Size.X.Scale, gFill.Size.X.Scale, bFill.Size.X.Scale)
-                    preview.BackgroundColor3 = color
-                    GuiLib:_saveKey(id, colorToTable(color))
-                    if callback then safePcall(callback, color) end
+                local function setColorFromBars()
+                    local r = math.clamp(rFill.Size.X.Scale, 0, 1)
+                    local g = math.clamp(gFill.Size.X.Scale, 0, 1)
+                    local b = math.clamp(bFill.Size.X.Scale, 0, 1)
+                    color = Color3.new(r,g,b)
+                    colorPreview.BackgroundColor3 = color
+                    GuiLib:_saveKey(id, {r,g,b})
+                    if callback then safeCall(callback, color) end
                 end
 
-                rBar.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then draggingR = true end end)
-                rBar.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then draggingR = false end end)
-                gBar.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then draggingG = true end end)
-                gBar.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then draggingG = false end end)
-                bBar.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then draggingB = true end end)
-                bBar.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then draggingB = false end end)
+                rBar.InputBegan:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 then draggingR = true end
+                end)
+                rBar.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then draggingR = false end end)
+                gBar.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then draggingG = true end end)
+                gBar.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then draggingG = false end end)
+                bBar.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then draggingB = true end end)
+                bBar.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then draggingB = false end end)
 
-                UserInputService.InputChanged:Connect(function(i)
-                    if i.UserInputType == Enum.UserInputType.MouseMovement then
+                UserInputService.InputChanged:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseMovement then
                         if draggingR then
-                            local rel = clamp((i.Position.X - rBar.AbsolutePosition.X)/rBar.AbsoluteSize.X, 0, 1)
-                            rFill.Size = UDim2.new(rel,0,1,0)
-                            rL.Text = "R : " .. tostring(math.floor(rel*255))
-                            applyColor()
+                            local rel = math.clamp((input.Position.X - rBar.AbsolutePosition.X) / rBar.AbsoluteSize.X, 0, 1)
+                            rFill.Size = UDim2.new(rel, 0, 1, 0)
+                            rS.Text = "R : " .. tostring(math.floor(rel * 255))
+                            setColorFromBars()
                         end
                         if draggingG then
-                            local rel = clamp((i.Position.X - gBar.AbsolutePosition.X)/gBar.AbsoluteSize.X, 0, 1)
-                            gFill.Size = UDim2.new(rel,0,1,0)
-                            gL.Text = "G : " .. tostring(math.floor(rel*255))
-                            applyColor()
+                            local rel = math.clamp((input.Position.X - gBar.AbsolutePosition.X) / gBar.AbsoluteSize.X, 0, 1)
+                            gFill.Size = UDim2.new(rel, 0, 1, 0)
+                            gS.Text = "G : " .. tostring(math.floor(rel * 255))
+                            setColorFromBars()
                         end
                         if draggingB then
-                            local rel = clamp((i.Position.X - bBar.AbsolutePosition.X)/bBar.AbsoluteSize.X, 0, 1)
-                            bFill.Size = UDim2.new(rel,0,1,0)
-                            bL.Text = "B : " .. tostring(math.floor(rel*255))
-                            applyColor()
+                            local rel = math.clamp((input.Position.X - bBar.AbsolutePosition.X) / bBar.AbsoluteSize.X, 0, 1)
+                            bFill.Size = UDim2.new(rel, 0, 1, 0)
+                            bS.Text = "B : " .. tostring(math.floor(rel * 255))
+                            setColorFromBars()
                         end
                     end
                 end)
             end
 
-            btn.MouseButton1Click:Connect(openPicker)
+            btn.MouseButton1Click:Connect(function()
+                openPicker()
+            end)
 
             local function Set(c)
                 color = c or Color3.new(1,1,1)
-                preview.BackgroundColor3 = color
+                colorPreview.BackgroundColor3 = color
             end
 
             GuiLib._registry.colorpickers[id] = { Set = Set }
-            GuiLib:_saveKey(id, colorToTable(color))
+            -- save as [r,g,b]
+            local coltab = {color.R, color.G, color.B}
+            GuiLib:_saveKey(id, coltab)
 
-            updateCanvas()
+            table.insert(tabObj._elements, holder)
             return {
                 Set = Set,
                 Get = function() return color end,
@@ -768,59 +725,65 @@ function GuiLib:CreateWindow(opts)
             }
         end
 
-        -- AddKeyBind
+        -- KeyBind
         function tabObj:AddKeyBind(text, defaultKey, callback)
-            defaultKey = defaultKey or Enum.KeyCode.Unknown
             local id = genId("keybind")
-            local key = defaultKey
-            local holder = newHolder(36)
+            local key = defaultKey or Enum.KeyCode.Unknown
+
+            local holder = newElementHolder(36)
             local btn = Instance.new("TextButton")
             btn.Size = UDim2.new(1,0,1,0)
             btn.BackgroundColor3 = Theme.Element
             btn.BorderSizePixel = 0
-            btn.Text = text .. " : " .. tostring(key.Name or "Unknown")
+            btn.Text = text .. " : " .. tostring(key.Name)
             btn.TextColor3 = Theme.Text
             btn.Font = Theme.Font
             btn.TextSize = 14
             btn.Parent = holder
-            local corner = Instance.new("UICorner") corner.CornerRadius = UDim.new(0, Theme.Corner/1.5) corner.Parent = btn
 
-            local listening = false
-            local conn = nil
+            local corner = Instance.new("UICorner")
+            corner.CornerRadius = UDim.new(0, Theme.CornerRadius/1.5)
+            corner.Parent = btn
 
+            local waiting = false
             btn.MouseButton1Click:Connect(function()
-                if listening then return end
-                listening = true
+                waiting = true
                 btn.Text = text .. " : " .. "..."
+                local conn
                 conn = UserInputService.InputBegan:Connect(function(input, processed)
-                    if processed then return end
                     if input.UserInputType == Enum.UserInputType.Keyboard then
                         key = input.KeyCode
-                        btn.Text = text .. " : " .. tostring(key.Name or "Unknown")
-                        GuiLib:_saveKey(id, key.Name or "Unknown")
-                        if callback then safePcall(callback, key) end
-                        listening = false
-                        if conn then conn:Disconnect(); conn = nil end
+                        btn.Text = text .. " : " .. tostring(key.Name)
+                        GuiLib:_saveKey(id, key.Name)
+                        if callback then safeCall(callback, key) end
+                        waiting = false
+                        conn:Disconnect()
                     end
                 end)
             end)
 
             local function Set(kname)
-                if type(kname) == "string" and Enum.KeyCode[kname] then
-                    key = Enum.KeyCode[kname]
-                    btn.Text = text .. " : " .. tostring(key.Name)
+                if type(kname) == "string" then
+                    local kk = Enum.KeyCode[kname]
+                    if kk then
+                        key = kk
+                        btn.Text = text .. " : " .. tostring(key.Name)
+                    end
                 end
             end
 
-            -- register global handler
-            local keyName = tostring(key.Name)
-            if not _globalKeybinds[keyName] then _globalKeybinds[keyName] = {} end
-            table.insert(_globalKeybinds[keyName], function() safePcall(callback) end)
-
-            GuiLib._registry.keybinds[id] = { Set = function(k) Set(k) end }
+            GuiLib._registry.keybinds[id] = { Set = Set }
             GuiLib:_saveKey(id, key.Name or "Unknown")
 
-            updateCanvas()
+            -- Global hook for activation (simple)
+            UserInputService.InputBegan:Connect(function(input, processed)
+                if processed then return end
+                if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == key then
+                    safeCall(callback)
+                end
+            end)
+
+            table.insert(tabObj._elements, holder)
             return {
                 Set = Set,
                 Get = function() return key end,
@@ -828,40 +791,43 @@ function GuiLib:CreateWindow(opts)
             }
         end
 
-        -- AddTextbox
-        function tabObj:AddTextbox(placeholder, default, callback)
-            default = default or ""
+        -- Textbox
+        function tabObj:AddTextbox(text, default, callback)
             local id = genId("textbox")
-            local value = default
+            local value = default or ""
 
-            local holder = newHolder(36)
+            local holder = newElementHolder(36)
             local box = Instance.new("TextBox")
             box.Size = UDim2.new(1,0,1,0)
             box.BackgroundColor3 = Theme.Element
-            box.Text = default
-            box.PlaceholderText = placeholder or ""
+            box.Text = default or ""
             box.TextColor3 = Theme.Text
             box.Font = Theme.Font
             box.TextSize = 14
             box.ClearTextOnFocus = false
             box.Parent = holder
-            local corner = Instance.new("UICorner") corner.CornerRadius = UDim.new(0, Theme.Corner/1.5) corner.Parent = box
+
+            local corner = Instance.new("UICorner")
+            corner.CornerRadius = UDim.new(0, Theme.CornerRadius/1.5)
+            corner.Parent = box
 
             box.FocusLost:Connect(function(enter)
                 value = box.Text
                 GuiLib:_saveKey(id, value)
-                if callback and enter then safePcall(callback, value) end
+                if callback and enter then safeCall(callback, value) end
             end)
 
             local function Set(v)
-                value = tostring(v or "")
+                value = v or ""
                 box.Text = value
             end
 
             GuiLib._registry.textboxes[id] = { Set = Set }
             GuiLib:_saveKey(id, value)
 
+            table.insert(tabObj._elements, holder)
             updateCanvas()
+
             return {
                 Set = Set,
                 Get = function() return value end,
@@ -869,47 +835,56 @@ function GuiLib:CreateWindow(opts)
             }
         end
 
-        -- tab click behavior
+        -- default tab activation logic
         tabBtn.MouseButton1Click:Connect(function()
-            for _,t in ipairs(winObj.tabs) do
-                if t.frame then t.frame.Visible = false end
-                if t._button and t._button:IsA("TextButton") then t._button.BackgroundColor3 = winObj.theme.Element end
+            for _,c in pairs(contentHolder:GetChildren()) do
+                if c:IsA("ScrollingFrame") then c.Visible = false end
+            end
+            for _,b in pairs(tabHolder:GetChildren()) do
+                if b:IsA("TextButton") then b.BackgroundColor3 = Theme.Element end
             end
             tabFrame.Visible = true
-            tabBtn.BackgroundColor3 = winObj.theme.Accent
+            tabBtn.BackgroundColor3 = Theme.Accent
         end)
 
-        -- activate first tab by default
+        -- show first added tab automatically
         if #winObj.tabs == 0 then
             tabFrame.Visible = true
-            tabBtn.BackgroundColor3 = winObj.theme.Accent
+            tabBtn.BackgroundColor3 = Theme.Accent
         end
 
         table.insert(winObj.tabs, tabObj)
         return tabObj
     end
 
-    -- Save/Load/Import/Export helpers on window
-    function winObj:SaveConfig(name) return GuiLib.ConfigManager:Save(name) end
-    function winObj:LoadConfig(name)
-        local ok, err = GuiLib.ConfigManager:Load(name)
-        if ok then GuiLib:_applyConfigMap() end
-        return ok, err
+    -- Add convenience methods to window for config ops
+    function winObj:SaveConfig(name)
+        return GuiLib.ConfigManager:Save(name)
     end
-    function winObj:ExportConfig() return HttpService:JSONEncode(GuiLib.ConfigManager.data) end
+    function winObj:LoadConfig(name)
+        local ok,err = GuiLib.ConfigManager:Load(name)
+        if ok then
+            GuiLib:_applyConfig()
+        end
+        return ok,err
+    end
+    function winObj:ExportConfig()
+        return HttpService:JSONEncode(GuiLib.ConfigManager.data)
+    end
     function winObj:ImportConfig(json)
-        local ok, parsed = pcall(function() return HttpService:JSONDecode(json) end)
+        local ok,parsed = pcall(function() return HttpService:JSONDecode(json) end)
         if ok and type(parsed) == "table" then
             GuiLib.ConfigManager.data = parsed
-            GuiLib:_applyConfigMap()
+            GuiLib:_applyConfig()
             return true
         end
         return false
     end
-    function winObj:Destroy() safePcall(function() screenGui:Destroy() end) end
+    function winObj:Destroy()
+        screenGui:Destroy()
+    end
 
     return winObj
 end
 
--- return library
-return setmetatable(GuiLib, { __call = function(_, ...) return GuiLib:CreateWindow(...) end })
+return GuiLib
