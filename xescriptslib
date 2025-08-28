@@ -178,7 +178,7 @@ local function createShadow(parent, size, offset)
     return shadow
 end
 
--- ===== Notification System =====
+-- Notification System (fixed)
 local function createNotification(text, type, duration)
     local player = Players.LocalPlayer
     local gui = player.PlayerGui:FindFirstChild("NeverloseNotifications")
@@ -230,10 +230,16 @@ local function createNotification(text, type, duration)
     tween(notif, 0.3, {Position = UDim2.new(1, -320, 0, 20 + (#gui:GetChildren() - 2) * 70)})
     
     -- Auto remove
-    wait(duration or 3)
-    tween(notif, 0.3, {Position = UDim2.new(1, 0, 0, 20 + (#gui:GetChildren() - 2) * 70)})
-    wait(0.3)
-    notif:Destroy()
+    spawn(function()
+        wait(duration or 3)
+        if notif and notif.Parent then
+            tween(notif, 0.3, {Position = UDim2.new(1, 0, 0, 20 + (#gui:GetChildren() - 2) * 70)})
+            wait(0.3)
+            if notif and notif.Parent then
+                notif:Destroy()
+            end
+        end
+    end)
 end
 
 -- ===== Core: CreateWindow =====
@@ -373,41 +379,46 @@ function NeverloseLib:CreateWindow(opts)
     winObj.tabs = {}
     winObj.activeTab = nil
     
-    -- Close functionality
+    -- Close functionality (fixed)
     closeBtn.MouseButton1Click:Connect(function()
-        tween(window, 0.3, {Size = UDim2.new(0, 0, 0, 0)})
-        wait(0.3)
-        screenGui:Destroy()
+        tween(window, 0.3, {Size = UDim2.new(0, 0, 0, 0), Position = UDim2.new(0.5, 0, 0.5, 0)})
+        spawn(function()
+            wait(0.3)
+            screenGui:Destroy()
+        end)
     end)
     
-    -- Dragging
+    -- Hover effect for close button
+    closeBtn.MouseEnter:Connect(function()
+        tween(closeBtn, 0.2, {BackgroundColor3 = Theme.Danger})
+    end)
+    
+    closeBtn.MouseLeave:Connect(function()
+        tween(closeBtn, 0.2, {BackgroundColor3 = Theme.Element})
+    end)
+    
+    -- Dragging (fixed)
     local dragging = false
-    local dragInput, dragStart, startPos
+    local dragStart, startPos
     
     titleBar.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = true
             dragStart = input.Position
             startPos = window.Position
+            
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
         end
     end)
     
     titleBar.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement then
-            dragInput = input
-        end
-    end)
-    
-    UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
+        if input.UserInputType == Enum.UserInputType.MouseMovement and dragging then
             local delta = input.Position - dragStart
             window.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-        end
-    end)
-    
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = false
         end
     end)
     
@@ -1349,9 +1360,13 @@ function NeverloseLib:CreateWindow(opts)
     end
     
     function winObj:Destroy()
-        tween(window, 0.3, {Size = UDim2.new(0, 0, 0, 0)})
-        wait(0.3)
-        screenGui:Destroy()
+        tween(window, 0.3, {Size = UDim2.new(0, 0, 0, 0), Position = UDim2.new(0.5, 0, 0.5, 0)})
+        spawn(function()
+            wait(0.3)
+            if screenGui and screenGui.Parent then
+                screenGui:Destroy()
+            end
+        end)
     end
     
     -- Intro animation
